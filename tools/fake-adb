@@ -1,0 +1,32 @@
+#!/bin/sh
+# Stands in for adb, for the pretend tablet of tools/fake-tablet.sh: ADB_PATH=<this file> AndroidFiles.
+# Knows what the app uses: devices -l, and -s <serial> shell | exec-out | exec-in | pull -a | push.
+# Like the real adb, exec-out and exec-in always exit 0, whatever the command did.
+# Usage: fake-adb devices -l
+name=androidfiles-tablet
+docker=$(command -v docker || echo /usr/local/bin/docker)
+[ -x "$docker" ] || docker=$HOME/.docker/bin/docker
+run() { "$docker" exec -i -e PATH=/tb:/usr/bin:/bin $name mksh -c "$1"; }
+case "$1" in
+  -h|--help) sed -n '2,5p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+  devices)
+    echo "List of devices attached"
+    [ "$("$docker" inspect -f '{{.State.Running}}' $name 2>/dev/null)" = true ] &&
+      echo "FAKE0001               device usb:1-1 product:fake model:Pretend_Tablet device:fake transport_id:1"
+    exit 0 ;;
+  -s)
+    case "$3" in
+      shell) run "$4" < /dev/null ;;
+      exec-out) run "$4" < /dev/null; exit 0 ;;
+      exec-in)
+        # A slow link while /tmp/fake-adb.slow exists (about 1 MB/s), to cut an upload halfway.
+        if [ -e /tmp/fake-adb.slow ]; then
+          perl -e '$|=1; binmode STDIN; binmode STDOUT; while (read(STDIN, $b, 65536)) { print $b; select(undef, undef, undef, 0.06) }' | run "$4"
+        else run "$4"; fi
+        exit 0 ;;
+      pull) "$docker" cp -a "$name:$5" "$6" > /dev/null 2>&1 || { echo "adb: error: failed to stat remote object '$5'" >&2; exit 1; } ;;
+      push) "$docker" cp "$4" "$name:$5" > /dev/null 2>&1 || { echo "adb: error: failed to copy '$4' to '$5'" >&2; exit 1; } ;;
+      *) echo "fake-adb: unknown command $3" >&2; exit 1 ;;
+    esac ;;
+  *) echo "fake-adb: unknown command $1" >&2; exit 1 ;;
+esac
